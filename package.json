@@ -1,0 +1,13 @@
+{
+  "name": "telegram-community-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A friendly Telegram group bot for welcomes, moderation, and AI-powered help.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
