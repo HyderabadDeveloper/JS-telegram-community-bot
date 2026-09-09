@@ -5,9 +5,18 @@
   "description": "A friendly Telegram group bot for welcomes, moderation, and AI-powered help.",
   "type": "module",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "node --test",
+    "dev:worker": "wrangler dev",
+    "deploy:check": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy",
+    "secrets:upload": "node scripts/cloudflare.js secrets",
+    "webhook:set": "node scripts/cloudflare.js webhook"
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "wrangler": "^4.129.0"
   }
 }

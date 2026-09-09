@@ -1,4 +1,5 @@
 import http from "node:http";
+import { createBot } from "./bot.js";
 import { existsSync, readFileSync } from "node:fs";
 
 if (existsSync(".env")) {
@@ -14,11 +15,6 @@ if (!token) {
   throw new Error("TELEGRAM_BOT_TOKEN is required. Copy .env.example to .env and configure it.");
 }
 
-const apiBase = `https://api.telegram.org/bot${token}`;
-const spamTerms = (process.env.SPAM_TERMS || "")
-  .split(",")
-  .map((term) => term.trim().toLowerCase())
-  .filter(Boolean);
 const aiEnabled = Boolean(process.env.AI_API_KEY);
 const webhookUrl = process.env.WEBHOOK_URL || "";
 const webhookSecret = process.env.WEBHOOK_SECRET || "";
@@ -35,135 +31,13 @@ if (webhookUrl) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("Webhook mode requires PORT between 1 and 65535.");
   }
+  console.log(`Webhook mode enabled. Listening on port ${port} for ${webhookUrl}`);
   webhookPath = url.pathname;
 }
 let offset = 0;
 let stopping = false;
 
-const guidelines = [
-  "Welcome! Please introduce yourself and help keep this a friendly space.",
-  "Share useful, relevant information and be respectful of different viewpoints.",
-  "No spam, scams, unsolicited promotions, or repeated messages.",
-  "When sharing someone else's work, credit the original source.",
-  "If you need help, ask a clear question. Community members and I will do our best to help."
-].join("\n");
-
-async function telegram(method, body = {}) {
-  const response = await fetch(`${apiBase}/${method}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body)
-  });
-  const result = await response.json();
-  if (!response.ok || !result.ok) {
-    throw new Error(`Telegram ${method} failed: ${result.description || response.statusText}`);
-  }
-  return result.result;
-}
-
-async function sendMessage(chatId, text, replyToMessageId) {
-  return telegram("sendMessage", {
-    chat_id: chatId,
-    text,
-    ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId } } : {})
-  });
-}
-
-function messageText(message) {
-  return `${message.text || ""} ${message.caption || ""}`.trim();
-}
-
-function containsSpam(text) {
-  const normalized = text.toLowerCase();
-  return spamTerms.some((term) => normalized.includes(term));
-}
-
-async function moderate(message) {
-  try {
-    await telegram("deleteMessage", {
-      chat_id: message.chat.id,
-      message_id: message.message_id
-    });
-    await sendMessage(
-      message.chat.id,
-      "This message was removed because it looks like spam. Please keep promotions and unsolicited links out of the group.",
-      undefined
-    );
-  } catch (error) {
-    console.error("Moderation action failed:", error.message);
-  }
-}
-
-async function askAi(question) {
-  const response = await fetch(`${process.env.AI_BASE_URL || "https://api.openai.com/v1"}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${process.env.AI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model: process.env.AI_MODEL || "gpt-4o-mini",
-      temperature: 0.3,
-      max_tokens: 500,
-      messages: [
-        {
-          role: "system",
-          content: process.env.AI_SYSTEM_PROMPT || "You are a concise, friendly community assistant."
-        },
-        { role: "user", content: question }
-      ]
-    })
-  });
-  const result = await response.json();
-  if (!response.ok) {
-    throw new Error(result.error?.message || response.statusText);
-  }
-  return result.choices?.[0]?.message?.content?.trim() || "I could not find an answer right now.";
-}
-
-async function handleMessage(message) {
-  if (message.new_chat_members?.length) {
-    await sendMessage(message.chat.id, guidelines);
-    return;
-  }
-
-  const text = messageText(message);
-  if (!text) return;
-
-  if (containsSpam(text)) {
-    await moderate(message);
-    return;
-  }
-
-  const command = text.split(/\s+/, 1)[0].toLowerCase().split("@", 1)[0];
-  if (command === "/guidelines") {
-    await sendMessage(message.chat.id, guidelines, message.message_id);
-    return;
-  }
-
-  if (command === "/start" || command === "/help") {
-    await sendMessage(
-      message.chat.id,
-      `${aiEnabled ? "Ask me a question by replying with /ask followed by your question." : "AI help is not configured yet."}\nUse /guidelines to see the group guidelines.`,
-      message.message_id
-    );
-    return;
-  }
-
-  if (aiEnabled && command === "/ask") {
-    const question = text.replace(/^\S+\s*/, "").trim();
-    if (!question) {
-      await sendMessage(message.chat.id, "Please add a question after /ask.", message.message_id);
-      return;
-    }
-    try {
-      await sendMessage(message.chat.id, await askAi(question), message.message_id);
-    } catch (error) {
-      console.error("AI request failed:", error.message);
-      await sendMessage(message.chat.id, "I cannot reach the AI service right now. Please try again later.", message.message_id);
-    }
-  }
-}
+const { telegram, handleMessage } = createBot(process.env);
 
 async function poll() {
   while (!stopping) {

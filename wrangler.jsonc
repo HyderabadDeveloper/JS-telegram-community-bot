@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "telegram-community-bot",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-06",
+  "workers_dev": true,
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AI_RATE_LIMITER",
+        "class_name": "AiRateLimiter"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["AiRateLimiter"]
+    }
+  ]
+}
