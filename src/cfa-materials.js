@@ -3,25 +3,25 @@ export const cfaMaterials = {
   level1: {
     label: "Level I",
     providers: {
-      schweser: { label: "Schweser", message: "CFA Level I — Schweser material\n\nAdd your Schweser Level I notes, QBank, video, or download links here. \n https://drive.google.com/drive/folders/1DGuuEBJLJDArpgO5rtw8Al-ckLzLkJvC?usp=sharing" },
-      institute: { label: "CFA Institute", message: "CFA Level I — CFA Institute material\n\nAdd your CFA Institute Learning Ecosystem, curriculum, practice-question, or download links here. \n https://drive.google.com/drive/folders/1t6A6eBJ7hQjkzuqiQoUkUPlu7uUdoBeJ?usp=sharing " },
-      everything: { label: "Everything", message: "CFA Level I — CFA Institute material\n\nAdd your CFA Institute Learning Ecosystem, curriculum, practice-question, or download links here.\n https://drive.google.com/drive/folders/1rmElE5AkqElRAL0ZpGXrtkXRDurSabf6?usp=sharing" }
+      schweser: { label: "Schweser", message: "CFA Level I — Schweser material\n \n https://drive.google.com/drive/folders/1DGuuEBJLJDArpgO5rtw8Al-ckLzLkJvC?usp=sharing" },
+      institute: { label: "CFA Institute", message: "CFA Level I — CFA Institute material\n \n https://drive.google.com/drive/folders/1t6A6eBJ7hQjkzuqiQoUkUPlu7uUdoBeJ?usp=sharing " },
+      everything: { label: "Everything", message: "CFA Level I — CFA Institute material\n \n https://drive.google.com/drive/folders/1rmElE5AkqElRAL0ZpGXrtkXRDurSabf6?usp=sharing" }
     }
   },
   level2: {
     label: "Level II",
     providers: {
       schweser: { label: "Schweser", message: "CFA Level II — Schweser material\n\nAdd your Schweser Level II notes, QBank, video, or download links here. \n https://drive.google.com/drive/folders/1BT5A89xxhNvEIdiS5e8FEcd0w0vF9g9r?usp=drive_link " },
-      institute: { label: "CFA Institute", message: "CFA Level II — CFA Institute material\n\nAdd your CFA Institute Learning Ecosystem, curriculum, practice-question, or download links here.\n https://drive.google.com/drive/folders/19M8OmGoJycdSJzFU-ksg2hD3McWfClKF?usp=drive_link" },
-      everything: { label: "Everything", message: "CFA Level II — CFA Institute material\n\nAdd your CFA Institute Learning Ecosystem, curriculum, practice-question, or download links here. \n https://drive.google.com/drive/folders/1CRoPWv3KfDFGrVVavt5nNmD-tSX4Eypz?usp=drive_link" }
+      institute: { label: "CFA Institute", message: "CFA Level II — CFA Institute material\n \n https://drive.google.com/drive/folders/19M8OmGoJycdSJzFU-ksg2hD3McWfClKF?usp=drive_link" },
+      everything: { label: "Everything", message: "CFA Level II — CFA Institute material\n  \n https://drive.google.com/drive/folders/1CRoPWv3KfDFGrVVavt5nNmD-tSX4Eypz?usp=drive_link" }
     }
   },
   level3: {
     label: "Level III",
     providers: {
-      schweser: { label: "Schweser", message: "CFA Level III — Schweser material\n\nAdd your Schweser Level III notes, QBank, video, or download links here." },
-      institute: { label: "CFA Institute", message: "CFA Level III — CFA Institute material\n\nAdd your CFA Institute Learning Ecosystem, curriculum, practice-question, or download links here." },
-      everything: { label: "Everything", message: "CFA Level II — CFA Institute material\n\nAdd your CFA Institute Learning Ecosystem, curriculum, practice-question, or download links here. https://drive.google.com/drive/folders/1CRoPWv3KfDFGrVVavt5nNmD-tSX4Eypz?usp=drive_link" }
+      schweser: { label: "Schweser", message: "CFA Level III — Schweser material\n\n " },
+      institute: { label: "CFA Institute", message: "CFA Level III — CFA Institute material\n " },
+      everything: { label: "Everything", message: "CFA Level III — CFA Institute material\n  " }
     }
   }
 };
