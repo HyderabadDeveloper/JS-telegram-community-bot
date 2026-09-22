@@ -5,7 +5,7 @@ A dependency-free Node.js Telegram group bot that:
 - Welcomes new members with configurable community guidelines.
 - Removes messages containing configured spam terms.
 - Welcomes new members with an introduction, bot instructions, and community rules.
-- Responds to `/help`, `/rules`, and `/guidelines`.
+- Responds to `/help`, `/rules`, `/guidelines`, and interactive `/cfamaterial` and `/frmmaterial` menus.
 - Optionally answers `/ask your question` or `ask your question` through Gemini.
 - Exposes `GET /health` for deployment health checks.
 
@@ -47,11 +47,11 @@ Requires Node.js 22 or newer for the deployment tools. The Worker uses `src/work
 2. Run `npm test` and `npm run deploy:check`.
 3. Run `npm run deploy` to create/update `telegram-community-bot`.
 4. Run `npm run secrets:upload` to upload the bot settings from `.env` as encrypted Worker secrets. A webhook secret is generated if absent. Credentials are passed through stdin, not command arguments.
-5. Run `npm run webhook:set -- https://telegram-community-bot.YOUR-SUBDOMAIN.workers.dev/telegram/webhook` using the URL Wrangler prints. This checks health and authentication, registers the webhook, and saves the URL in `.env`.
+5. Run `npm run webhook:set -- https://telegram-community-bot.YOUR-SUBDOMAIN.workers.dev/telegram/webhook` using the URL Wrangler prints. This checks health and authentication, registers the webhook (including inline-button clicks), and saves the URL in `.env`.
 
 Cloudflare supplies HTTPS; no tunnel or `PORT` setting is needed in production. Stop any locally running bot before switching. Do not run `npm start` while the Cloudflare deployment handles your bot; use `npm run dev:worker` for local Worker development. On Windows, use `npm.cmd` and `npx.cmd` if PowerShell blocks the `.ps1` launchers.
 
-After code changes, run `npm run deploy`. After changing bot settings in `.env`, run `npm run secrets:upload`; if you change the webhook secret, also rerun `npm run webhook:set -- <url>`.
+After code changes, run `npm run deploy`. If a change adds a Telegram update type, such as inline-button clicks, also rerun `npm run webhook:set -- <url>`. After changing bot settings in `.env`, run `npm run secrets:upload`; if you change the webhook secret, also rerun `npm run webhook:set -- <url>`.
 
 ## Gemini assistant
 

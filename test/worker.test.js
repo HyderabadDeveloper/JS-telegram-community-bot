@@ -48,6 +48,42 @@ test("shared bot handles help and moderation; failed delivery returns retryable 
   assert.equal((await worker.fetch(request(update("/help")), env)).status, 500);
 });
 
+test("CFA material menu guides users from level to provider using local material data", async (t) => {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    calls.push({ method: url.split("/").pop(), body: JSON.parse(options.body) });
+    return Response.json({ ok: true, result: true });
+  });
+  const message = JSON.stringify({ update_id: 30, message: { chat: { id: 123 }, message_id: 30, text: "/cfamaterial" } });
+  const level = JSON.stringify({ update_id: 31, callback_query: { id: "level-click", data: "cfa_material:level1", message: { chat: { id: 123 }, message_id: 31 } } });
+  const provider = JSON.stringify({ update_id: 32, callback_query: { id: "provider-click", data: "cfa_material:level1:schweser", message: { chat: { id: 123 }, message_id: 32 } } });
+
+  assert.equal((await worker.fetch(request(message), env)).status, 200);
+  assert.equal(calls[0].method, "sendMessage");
+  assert.equal(calls[0].body.text, "Which CFA level are you preparing for?");
+  assert.deepEqual(calls[0].body.reply_markup.inline_keyboard.map(row => row[0].text), ["Level I", "Level II", "Level III"]);
+
+  assert.equal((await worker.fetch(request(level), env)).status, 200);
+  assert.deepEqual(calls.slice(1).map(call => call.method), ["answerCallbackQuery", "sendMessage"]);
+  assert.deepEqual(calls[2].body.reply_markup.inline_keyboard.map(row => row[0].text), ["Schweser", "CFA Institute", "Everything"]);
+
+  assert.equal((await worker.fetch(request(provider), env)).status, 200);
+  assert.deepEqual(calls.slice(3).map(call => call.method), ["answerCallbackQuery", "sendMessage"]);
+  assert.match(calls[4].body.text, /Level I — Schweser material/);
+});
+
+test("FRM material menu offers Levels I and II with all providers", async (t) => {
+  const calls = [];
+  t.mock.method(globalThis, "fetch", async (url, options) => {
+    calls.push({ method: url.split("/").pop(), body: JSON.parse(options.body) });
+    return Response.json({ ok: true, result: true });
+  });
+  const update = JSON.stringify({ update_id: 33, message: { chat: { id: 123 }, message_id: 33, text: "/frmmaterial" } });
+  assert.equal((await worker.fetch(request(update), env)).status, 200);
+  assert.equal(calls[0].body.text, "Which FRM level are you preparing for?");
+  assert.deepEqual(calls[0].body.reply_markup.inline_keyboard.map(row => row[0].text), ["Level I", "Level II"]);
+});
+
 test("Gemini answers slash and plain ask messages", async (t) => {
   const telegramMessages = [];
   const aiRequests = [];

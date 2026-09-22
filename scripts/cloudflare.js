@@ -55,7 +55,12 @@ try {
       body: JSON.stringify({ update_id: 0 })
     });
     if (!probe.ok) throw new Error(`Worker authentication check failed: ${probe.status}`);
-    await telegram("setWebhook", { url: url.href, secret_token: env.WEBHOOK_SECRET, allowed_updates: ["message"], max_connections: 1 });
+    await telegram("setWebhook", {
+      url: url.href,
+      secret_token: env.WEBHOOK_SECRET,
+      allowed_updates: ["message", "callback_query"],
+      max_connections: 1
+    });
     const info = await telegram("getWebhookInfo");
     if (info.url !== url.href) throw new Error("Telegram webhook URL verification failed.");
     let source = readFileSync(".env", "utf8");

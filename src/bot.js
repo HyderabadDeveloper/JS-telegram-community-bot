@@ -1,4 +1,5 @@
 import Groq from "groq-sdk";
+import { cfaMaterials, frmMaterials } from "./cfa-materials.js";
 
 function errorInfo(error) {
   if (error instanceof Error) {
@@ -124,6 +125,8 @@ export function createBot(env) {
     "• Ask a question: /ask When is the next CFA Level 1 exam?",
     "• You can also write: ask what are modules covered in CFA level 2 ?",
     "• Read the community rules: /rules or /guidelines",
+    "• Browse CFA study material: /cfamaterial",
+    "• Browse FRM study material: /frmmaterial",
     "• Show this help message: /help",
     "",
     "For a useful answer, ask one clear question and include relevant details. I can make mistakes, so verify important information."
@@ -176,6 +179,51 @@ export function createBot(env) {
         }
       } : {})
     });
+  }
+
+  async function sendCfaLevels(chatId, replyToMessageId) {
+    const inline_keyboard = Object.entries(cfaMaterials).map(([levelId, level]) => [{ text: level.label, callback_data: `cfa_material:${levelId}` }]);
+    return telegram("sendMessage", {
+      chat_id: chatId,
+      text: "Which CFA level are you preparing for?",
+      reply_markup: { inline_keyboard },
+      ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId, allow_sending_without_reply: true } } : {})
+    });
+  }
+
+  async function sendFrmLevels(chatId, replyToMessageId) {
+    const inline_keyboard = Object.entries(frmMaterials).map(([levelId, level]) => [{ text: level.label, callback_data: `frm_material:${levelId}` }]);
+    return telegram("sendMessage", {
+      chat_id: chatId,
+      text: "Which FRM level are you preparing for?",
+      reply_markup: { inline_keyboard },
+      ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId, allow_sending_without_reply: true } } : {})
+    });
+  }
+
+  async function handleCallbackQuery(callbackQuery) {
+    const chatId = callbackQuery?.message?.chat?.id;
+    const data = callbackQuery?.data || "";
+    const isCfa = data.startsWith("cfa_material:");
+    const isFrm = data.startsWith("frm_material:");
+    if (!chatId || (!isCfa && !isFrm)) return;
+
+    await telegram("answerCallbackQuery", { callback_query_id: callbackQuery.id });
+    const [, levelId, providerId] = data.split(":");
+    const materials = isCfa ? cfaMaterials : frmMaterials;
+    const exam = isCfa ? "CFA" : "FRM";
+    const level = materials[levelId];
+    if (!level) return sendMessage(chatId, `That ${exam} level is no longer available. Please open the material menu again.`);
+
+    if (!providerId) {
+      const prefix = isCfa ? "cfa_material" : "frm_material";
+      const inline_keyboard = Object.entries(level.providers).map(([id, provider]) => [{ text: provider.label, callback_data: `${prefix}:${levelId}:${id}` }]);
+      return telegram("sendMessage", { chat_id: chatId, text: `${level.label}: which material would you like?`, reply_markup: { inline_keyboard } });
+    }
+
+    const provider = level.providers[providerId];
+    if (!provider) return sendMessage(chatId, "That material option is no longer available. Please open the material menu again.");
+    return sendMessage(chatId, provider.message);
   }
 
   function messageText(message) {
@@ -332,6 +380,16 @@ export function createBot(env) {
           return;
         }
 
+        if (command === "/cfamaterial" || command === "/cfa_material") {
+          await sendCfaLevels(message.chat.id, message.message_id);
+          return;
+        }
+
+        if (command === "/frmmaterial" || command === "/frm_material") {
+          await sendFrmLevels(message.chat.id, message.message_id);
+          return;
+        }
+
         const isAsk = command === "/ask" || command === "ask";
         const isKeywordTrigger = containsAiKeyword(text);
         if (!aiEnabled || (!isAsk && !isKeywordTrigger)) return;
@@ -363,7 +421,7 @@ export function createBot(env) {
       }
     }
 
-    return { telegram, handleMessage };
+    return { telegram, handleMessage, handleCallbackQuery };
   } catch (error) {
     logError("createBot", error, {
       telegramConfigured: Boolean(env?.TELEGRAM_BOT_TOKEN),

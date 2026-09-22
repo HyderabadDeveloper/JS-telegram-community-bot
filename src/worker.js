@@ -60,7 +60,9 @@ export default {
     }
 
     try {
-      if (update.message) await createBot(env).handleMessage(update.message);
+      const bot = createBot(env);
+      if (update.message) await bot.handleMessage(update.message);
+      if (update.callback_query) await bot.handleCallbackQuery(update.callback_query);
       return new Response("ok");
     } catch (error) {
       console.error("Webhook processing failed", {
@@ -68,8 +70,8 @@ export default {
         message: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
         updateId: update.update_id,
-        chatId: update.message?.chat?.id,
-        messageId: update.message?.message_id
+        chatId: update.message?.chat?.id || update.callback_query?.message?.chat?.id,
+        messageId: update.message?.message_id || update.callback_query?.message?.message_id
       });
       return new Response("Processing failed", { status: 500 });
     }
