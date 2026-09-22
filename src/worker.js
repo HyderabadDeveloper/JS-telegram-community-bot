@@ -28,7 +28,7 @@ export default {
     const path = new URL(request.url).pathname;
     if (path === "/health" && request.method === "GET") {
       const ready = Boolean(env.TELEGRAM_BOT_TOKEN && env.WEBHOOK_SECRET);
-      return Response.json({ status: ready ? "ok" : "unconfigured", aiEnabled: Boolean(env.AI_API_KEY) }, { status: ready ? 200 : 503 });
+      return Response.json({ status: ready ? "ok" : "unconfigured", aiEnabled: Boolean(env.AI_API_KEY || env.GROQ_API_KEY) }, { status: ready ? 200 : 503 });
     }
     if (path !== "/telegram/webhook") return new Response("Not found", { status: 404 });
     if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: { Allow: "POST" } });
@@ -63,7 +63,14 @@ export default {
       if (update.message) await createBot(env).handleMessage(update.message);
       return new Response("ok");
     } catch (error) {
-      console.error("Webhook processing failed:", error.message);
+      console.error("Webhook processing failed", {
+        name: error instanceof Error ? error.name : "UnknownError",
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        updateId: update.update_id,
+        chatId: update.message?.chat?.id,
+        messageId: update.message?.message_id
+      });
       return new Response("Processing failed", { status: 500 });
     }
   }

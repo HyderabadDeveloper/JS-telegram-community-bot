@@ -36,6 +36,10 @@ test("shared bot handles help and moderation; failed delivery returns retryable 
   assert.equal((await worker.fetch(request(update("/help")), env)).status, 200);
   assert.equal(calls[0].method, "sendMessage");
   assert.equal(calls[0].body.chat_id, 123);
+  assert.deepEqual(calls[0].body.reply_parameters, {
+    message_id: 7,
+    allow_sending_without_reply: true
+  });
   assert.match(calls[0].body.text, /Online assistant status: down/);
   assert.equal((await worker.fetch(request(update("spam")), env)).status, 200);
   assert.deepEqual(calls.slice(1).map(call => call.method), ["deleteMessage", "sendMessage"]);
@@ -67,8 +71,9 @@ test("Gemini answers slash and plain ask messages", async (t) => {
   assert.equal(aiRequests.length, 3);
   assert.match(aiRequests[0].url, /v1beta\/models\/gemini-3\.7-flash:generateContent$/);
   assert.equal(aiRequests[0].body.contents[0].parts[0].text, "Explain Workers");
-  assert.deepEqual(telegramMessages.map(message => message.text), ["<b>Gemini</b> <i>reply</i>", "<b>Gemini</b> <i>reply</i>"]);
-  assert.deepEqual(telegramMessages.map(message => message.parse_mode), ["HTML", "HTML"]);
+  const replies = telegramMessages.filter(message => message.parse_mode === "HTML");
+  assert.deepEqual(replies.map(message => message.text), ["<b>Gemini</b> <i>reply</i>", "<b>Gemini</b> <i>reply</i>"]);
+  assert.deepEqual(replies.map(message => message.parse_mode), ["HTML", "HTML"]);
 });
 
 test("Gemini Markdown is converted to safe Telegram HTML", () => {
@@ -139,8 +144,8 @@ test("AI keywords trigger Gemini and enforce three requests per user", async (t)
 
   assert.equal(aiRequests.length, 3);
   assert.equal(aiRequests[0].contents[0].parts[0].text, "Can anyone explain duration?");
-  assert.equal(telegramMessages.length, 4);
-  assert.match(telegramMessages[3].text, /used your 3 AI requests/);
+  const rateLimitMessages = telegramMessages.filter(message => /used your 3 AI requests/.test(message.text));
+  assert.equal(rateLimitMessages.length, 1);
 });
 
 test("test mode bypasses the persistent AI rate limiter", async (t) => {

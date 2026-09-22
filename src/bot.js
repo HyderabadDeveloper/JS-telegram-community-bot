@@ -1,5 +1,16 @@
 import Groq from "groq-sdk";
 
+function errorInfo(error) {
+  if (error instanceof Error) {
+    return { name: error.name, message: error.message, stack: error.stack };
+  }
+  return { message: String(error) };
+}
+
+function logError(scope, error, context = {}) {
+  console.error(`[bot] ${scope}`, { ...context, error: errorInfo(error) });
+}
+
 function escapeHtml(text) {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -85,11 +96,15 @@ export function splitTelegramMarkdown(markdown, maxLength = 4096) {
 }
 
 export function createBot(env) {
-  const apiBase = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
-  const spamTerms = (env.SPAM_TERMS || "").split(",").map(term => term.trim().toLowerCase()).filter(Boolean);
-  const aiKeywords = (env.AI_KEYWORDS || "share,suggest,send,guide,anyone").split(",").map(keyword => keyword.trim().toLowerCase()).filter(Boolean);
-  const aiEnabled = Boolean(env.AI_API_KEY);
-  const testMode = String(env.TEST_MODE || "").toLowerCase() === "true";
+  try {
+    if (!env || typeof env !== "object") throw new Error("Environment bindings are missing");
+    if (!env.TELEGRAM_BOT_TOKEN) throw new Error("TELEGRAM_BOT_TOKEN is missing");
+
+    const apiBase = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}`;
+    const spamTerms = (env.SPAM_TERMS || "").split(",").map(term => term.trim().toLowerCase()).filter(Boolean);
+    const aiKeywords = (env.AI_KEYWORDS || "share,suggest,send,guide,anyone").split(",").map(keyword => keyword.trim().toLowerCase()).filter(Boolean);
+    const aiEnabled = Boolean(env.AI_API_KEY || env.GROQ_API_KEY);
+    const testMode = String(env.TEST_MODE || "").toLowerCase() === "true";
 
   const guidelines = [
     "Community rules", "",
@@ -128,25 +143,38 @@ export function createBot(env) {
     ].join("\n");
   }
 
-  async function telegram(method, body = {}) {
-    const response = await fetch(`${apiBase}/${method}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body)
-    });
-    const result = await response.json();
-    if (!response.ok || !result.ok) {
-      throw new Error(`Telegram ${method} failed: ${result.description || response.statusText}`);
+    async function telegram(method, body = {}) {
+      try {
+        const response = await fetch(`${apiBase}/${method}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const result = await response.json();
+        if (!response.ok || !result.ok) {
+          throw new Error(`Telegram ${method} failed: ${result.description || response.statusText}`);
+        }
+        return result.result;
+      } catch (error) {
+        logError(`telegram.${method}`, error, { chatId: body.chat_id, messageId: body.reply_parameters?.message_id });
+        throw error;
+      }
     }
-    return result.result;
-  }
 
   async function sendMessage(chatId, text, replyToMessageId, parseMode) {
     return telegram("sendMessage", {
       chat_id: chatId,
       text,
       ...(parseMode ? { parse_mode: parseMode } : {}),
-      ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId } } : {})
+      // A command can be removed before an AI response is ready, or while Telegram
+      // retries delivery of an update. In that case, deliver the response without
+      // a reply reference instead of failing the whole webhook.
+      ...(replyToMessageId ? {
+        reply_parameters: {
+          message_id: replyToMessageId,
+          allow_sending_without_reply: true
+        }
+      } : {})
     });
   }
 
@@ -190,36 +218,42 @@ export function createBot(env) {
         undefined
       );
     } catch (error) {
-      console.error("Moderation action failed:", error.message);
+      logError("moderation", error, { chatId: message.chat.id, messageId: message.message_id });
+      throw error;
     }
   }
 
 
-  const groq = new Groq({
-    apiKey: env.GROQ_API_KEY
-  });
-
-  async function askGroq(question) {
-    {
-      const completion = await groq.chat.completions.create({
-        model: "openai/gpt-oss-20b",
-
-        messages: [
-          {
-            role: "system",
-            content: "You are a concise, friendly finance assistant. \nFormat the answer with standard Markdown when it improves readability. Use short headings, bold key terms, italic emphasis, bullet lists, and code blocks where appropriate."
-          },
-          {
-            role: "user",
-            content: question
-          }
-        ]
-      });
-
-      return completion.choices[0].message.content;
-
+    let groq;
+    try {
+      if (env.GROQ_API_KEY) groq = new Groq({ apiKey: env.GROQ_API_KEY });
+    } catch (error) {
+      logError("createBot.groqInitialization", error, { groqConfigured: Boolean(env.GROQ_API_KEY) });
+      throw new Error("Groq client initialization failed", { cause: error });
     }
-  }
+
+    async function askGroq(question) {
+      if (!groq) throw new Error("GROQ_API_KEY is missing; Groq AI cannot process this request");
+      try {
+        const completion = await groq.chat.completions.create({
+          model: "openai/gpt-oss-20b",
+          messages: [
+            {
+              role: "system",
+              content: "You are a concise, friendly finance assistant. \nFormat the answer with standard Markdown when it improves readability. Use short headings, bold key terms, italic emphasis, bullet lists, and code blocks where appropriate."
+            },
+            { role: "user", content: question }
+          ]
+        });
+
+        const answer = completion.choices?.[0]?.message?.content;
+        if (!answer) throw new Error("Groq returned no answer");
+        return answer;
+      } catch (error) {
+        logError("askGroq", error, { questionLength: question.length });
+        throw error;
+      }
+    }
 
   async function askAi(question) {
     const baseUrl = (env.AI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta").replace(/\/$/, "");
@@ -255,69 +289,87 @@ export function createBot(env) {
       || "I could not find an answer right now.";
   }
 
-  async function handleMessage(message) {
-    if (message.new_chat_members?.length) {
-      await sendMessage(message.chat.id, welcomeMessage(message.new_chat_members));
-      return;
-    }
+    async function handleMessage(message) {
+      let stage = "received";
+      const context = {
+        updateMessageId: message?.message_id,
+        chatId: message?.chat?.id,
+        userId: message?.from?.id
+      };
 
-    const text = messageText(message);
-    if (!text) return;
-
-    if (containsSpam(text)) {
-      await moderate(message);
-      return;
-    }
-
-    const command = text.split(/\s+/, 1)[0].toLowerCase().split("@", 1)[0];
-    if (command === "/guidelines" || command === "/rules") {
-      await sendMessage(message.chat.id, guidelines, message.message_id);
-      return;
-    }
-
-    if (command === "/start" || command === "/help") {
-      await sendMessage(
-        message.chat.id,
-        `${help}\n\n${aiEnabled ? "Online assistant status: ready." : "Online assistant status: down."}`,
-        message.message_id
-      );
-      return;
-    }
-
-    const isAsk = command === "/ask" || command === "ask";
-    const isKeywordTrigger = containsAiKeyword(text);
-    if (aiEnabled && (isAsk || isKeywordTrigger)) {
-      const question = isAsk ? text.replace(/^\S+\s*/, "").trim() : text;
-      if (!question) {
-        await sendMessage(message.chat.id, "Please add a question after /ask or ask.", message.message_id);
-        return;
-      }
       try {
+        
+        if (!message?.chat?.id) throw new Error("Telegram message has no chat id");
+        stage = "welcome";
+        if (message.new_chat_members?.length) {
+          await sendMessage(message.chat.id, welcomeMessage(message.new_chat_members));
+          return;
+        }
+
+        stage = "extracting text";
+        const text = messageText(message);
+        if (!text) return;
+
+        stage = "moderation";
+        if (containsSpam(text)) {
+          await moderate(message);
+          return;
+        }
+
+        const command = text.split(/\s+/, 1)[0].toLowerCase().split("@", 1)[0];
+        stage = "command handling";
+        if (command === "/guidelines" || command === "/rules") {
+          await sendMessage(message.chat.id, guidelines, message.message_id);
+          return;
+        }
+
+        if (command === "/start" || command === "/help") {
+          await sendMessage(
+            message.chat.id,
+            `${help}\n\n${aiEnabled ? "Online assistant status: ready." : "Online assistant status: down."}`,
+            message.message_id
+          );
+          return;
+        }
+
+        const isAsk = command === "/ask" || command === "ask";
+        const isKeywordTrigger = containsAiKeyword(text);
+        if (!aiEnabled || (!isAsk && !isKeywordTrigger)) return;
+
+        const question = isAsk ? text.replace(/^\S+\s*/, "").trim() : text;
+        if (!question) {
+          await sendMessage(message.chat.id, "Please add a question after /ask or ask.", message.message_id);
+          return;
+        }
+
+        stage = "AI allowance";
         const allowance = await consumeAiAllowance(message);
         if (!allowance.allowed) {
           const minutes = Math.max(1, Math.ceil(allowance.retryAfterSeconds / 60));
           await sendMessage(message.chat.id, `You have used your 3 AI requests. Please try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`, message.message_id);
           return;
         }
+
+        stage = "AI request";
         await sendMessage(message.chat.id, "Spinning up the AI...", message.message_id);
-        // const answer = await askAi(question);
-        // await sendMessage(message.chat.id, markdownToTelegramHtml(answer), message.message_id, "HTML");
-        try {
-          const answer = await askGroq(question);
-          for (const chunk of splitTelegramMarkdown(answer)) {
-            await sendMessage(message.chat.id, markdownToTelegramHtml(chunk), message.message_id, "HTML");
-          }
-        }
-        catch (error) {
-          console.error("Groq error:", error);
-          return "Sorry, I couldn't process your request.";
+        const answer = env.GROQ_API_KEY ? await askGroq(question) : await askAi(question);
+        stage = "AI response delivery";
+        for (const chunk of splitTelegramMarkdown(answer)) {
+          await sendMessage(message.chat.id, markdownToTelegramHtml(chunk), message.message_id, "HTML");
         }
       } catch (error) {
-        console.error("AI request failed:", error.message);
+        logError(`handleMessage.${stage}`, error, { ...context, aiConfigured: aiEnabled, groqConfigured: Boolean(env.GROQ_API_KEY) });
+        throw error;
       }
     }
+
+    return { telegram, handleMessage };
+  } catch (error) {
+    logError("createBot", error, {
+      telegramConfigured: Boolean(env?.TELEGRAM_BOT_TOKEN),
+      aiConfigured: Boolean(env?.AI_API_KEY),
+      groqConfigured: Boolean(env?.GROQ_API_KEY)
+    });
+    throw error;
   }
-
-
-  return { telegram, handleMessage };
 }
