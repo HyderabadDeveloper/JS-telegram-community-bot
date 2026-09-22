@@ -1,3 +1,5 @@
+import Groq from "groq-sdk";
+
 function escapeHtml(text) {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -19,8 +21,7 @@ export function markdownToTelegramHtml(markdown) {
     const index = tokens.push(html) - 1;
     return `\u0000${index}\u0000`;
   };
-  const limited = markdown.length > 3800 ? `${markdown.slice(0, 3750).trimEnd()}\n\n[Response shortened]` : markdown;
-  let text = limited.replace(/```(?:[\w.+-]+)?\s*\n?([\s\S]*?)```/g, (_match, code) => token(`<pre>${escapeHtml(code.trim())}</pre>`));
+  let text = markdown.replace(/```(?:[\w.+-]+)?\s*\n?([\s\S]*?)```/g, (_match, code) => token(`<pre>${escapeHtml(code.trim())}</pre>`));
   text = text.replace(/`([^`\n]+)`/g, (_match, code) => token(`<code>${escapeHtml(code)}</code>`));
   text = text.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_match, label, url) => token(`<a href="${escapeHtml(url)}">${escapeHtml(label)}</a>`));
   text = escapeHtml(text);
@@ -34,6 +35,53 @@ export function markdownToTelegramHtml(markdown) {
   text = text.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<i>$2</i>");
   text = text.replace(/(^|[^\w])_([^_\n]+)_(?!\w)/g, "$1<i>$2</i>");
   return text.replace(/\u0000(\d+)\u0000/g, (_match, index) => tokens[Number(index)]);
+}
+
+export function splitTelegramMarkdown(markdown, maxLength = 4096) {
+  const chunks = [];
+  let current = "";
+
+  const addPart = part => {
+    if (!part) return;
+    const candidate = current + part;
+    if (markdownToTelegramHtml(candidate).length <= maxLength) {
+      current = candidate;
+      return;
+    }
+
+    if (current) {
+      chunks.push(current);
+      current = "";
+    }
+
+    if (markdownToTelegramHtml(part).length <= maxLength) {
+      current = part;
+      return;
+    }
+
+    let remaining = part;
+    while (remaining) {
+      let low = 1;
+      let high = remaining.length;
+      let fitting = 1;
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        if (markdownToTelegramHtml(remaining.slice(0, middle)).length <= maxLength) {
+          fitting = middle;
+          low = middle + 1;
+        } else {
+          high = middle - 1;
+        }
+      }
+      chunks.push(remaining.slice(0, fitting));
+      remaining = remaining.slice(fitting);
+    }
+  };
+
+  const parts = markdown.match(/[^\r\n]*(?:\r\n|\r|\n|$)/g) || [];
+  parts.filter(part => part !== "").forEach(addPart);
+  if (current) chunks.push(current);
+  return chunks;
 }
 
 export function createBot(env) {
@@ -79,7 +127,7 @@ export function createBot(env) {
       guidelines
     ].join("\n");
   }
-  
+
   async function telegram(method, body = {}) {
     const response = await fetch(`${apiBase}/${method}`, {
       method: "POST",
@@ -92,7 +140,7 @@ export function createBot(env) {
     }
     return result.result;
   }
-  
+
   async function sendMessage(chatId, text, replyToMessageId, parseMode) {
     return telegram("sendMessage", {
       chat_id: chatId,
@@ -101,11 +149,11 @@ export function createBot(env) {
       ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId } } : {})
     });
   }
-  
+
   function messageText(message) {
     return `${message.text || ""} ${message.caption || ""}`.trim();
   }
-  
+
   function containsSpam(text) {
     const normalized = text.toLowerCase();
     return spamTerms.some((term) => normalized.includes(term));
@@ -129,7 +177,7 @@ export function createBot(env) {
     if (!response.ok) throw new Error(`Rate limiter failed: ${response.status}`);
     return response.json();
   }
-  
+
   async function moderate(message) {
     try {
       await telegram("deleteMessage", {
@@ -145,7 +193,34 @@ export function createBot(env) {
       console.error("Moderation action failed:", error.message);
     }
   }
-  
+
+
+  const groq = new Groq({
+    apiKey: env.GROQ_API_KEY
+  });
+
+  async function askGroq(question) {
+    {
+      const completion = await groq.chat.completions.create({
+        model: "openai/gpt-oss-20b",
+
+        messages: [
+          {
+            role: "system",
+            content: "You are a concise, friendly finance assistant. \nFormat the answer with standard Markdown when it improves readability. Use short headings, bold key terms, italic emphasis, bullet lists, and code blocks where appropriate."
+          },
+          {
+            role: "user",
+            content: question
+          }
+        ]
+      });
+
+      return completion.choices[0].message.content;
+
+    }
+  }
+
   async function askAi(question) {
     const baseUrl = (env.AI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta").replace(/\/$/, "");
     const model = env.AI_MODEL || "gemini-3.7-flash";
@@ -179,27 +254,27 @@ export function createBot(env) {
     return result.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("").trim()
       || "I could not find an answer right now.";
   }
-  
+
   async function handleMessage(message) {
     if (message.new_chat_members?.length) {
       await sendMessage(message.chat.id, welcomeMessage(message.new_chat_members));
       return;
     }
-  
+
     const text = messageText(message);
     if (!text) return;
-  
+
     if (containsSpam(text)) {
       await moderate(message);
       return;
     }
-  
+
     const command = text.split(/\s+/, 1)[0].toLowerCase().split("@", 1)[0];
     if (command === "/guidelines" || command === "/rules") {
       await sendMessage(message.chat.id, guidelines, message.message_id);
       return;
     }
-  
+
     if (command === "/start" || command === "/help") {
       await sendMessage(
         message.chat.id,
@@ -208,7 +283,7 @@ export function createBot(env) {
       );
       return;
     }
-  
+
     const isAsk = command === "/ask" || command === "ask";
     const isKeywordTrigger = containsAiKeyword(text);
     if (aiEnabled && (isAsk || isKeywordTrigger)) {
@@ -224,15 +299,25 @@ export function createBot(env) {
           await sendMessage(message.chat.id, `You have used your 3 AI requests. Please try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`, message.message_id);
           return;
         }
-        const answer = await askAi(question);
-        await sendMessage(message.chat.id, markdownToTelegramHtml(answer), message.message_id, "HTML");
+        await sendMessage(message.chat.id, "Spinning up the AI...", message.message_id);
+        // const answer = await askAi(question);
+        // await sendMessage(message.chat.id, markdownToTelegramHtml(answer), message.message_id, "HTML");
+        try {
+          const answer = await askGroq(question);
+          for (const chunk of splitTelegramMarkdown(answer)) {
+            await sendMessage(message.chat.id, markdownToTelegramHtml(chunk), message.message_id, "HTML");
+          }
+        }
+        catch (error) {
+          console.error("Groq error:", error);
+          return "Sorry, I couldn't process your request.";
+        }
       } catch (error) {
         console.error("AI request failed:", error.message);
-        await sendMessage(message.chat.id, "I cannot reach the AI service right now. Please try again later.", message.message_id);
       }
     }
   }
-  
+
 
   return { telegram, handleMessage };
 }

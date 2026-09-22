@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/worker.js";
-import { markdownToTelegramHtml } from "../src/bot.js";
+import { markdownToTelegramHtml, splitTelegramMarkdown } from "../src/bot.js";
 
 const env = { TELEGRAM_BOT_TOKEN: "test", WEBHOOK_SECRET: "test-secret", SPAM_TERMS: "spam" };
 function request(body, secret = env.WEBHOOK_SECRET) {
@@ -88,6 +88,16 @@ test("Gemini Markdown is converted to safe Telegram HTML", () => {
   assert.match(html, /• Item with <code>x &lt; y<\/code>/);
   assert.match(html, /<a href="https:\/\/telegram\.org\/\?a=1&amp;b=2">Telegram<\/a>/);
   assert.match(html, /<pre>const value = '&lt;tag&gt;';<\/pre>/);
+});
+
+test("long AI answers are preserved as Telegram-sized chunks", () => {
+  const markdown = Array.from({ length: 12 }, (_, index) => `## Section ${index + 1}\n${"A useful explanation. ".repeat(300)}`).join("\n");
+  const chunks = splitTelegramMarkdown(markdown);
+
+  assert.ok(chunks.length > 1);
+  assert.equal(chunks.join(""), markdown);
+  assert.ok(chunks.every(chunk => markdownToTelegramHtml(chunk).length <= 4096));
+  assert.doesNotMatch(markdownToTelegramHtml(markdown), /\[Response shortened\]/);
 });
 
 test("AI keywords trigger Gemini and enforce three requests per user", async (t) => {
